@@ -1,46 +1,44 @@
-// --- BASE DE DATOS DE SITIOS (El usuario no ve esto, la extensión lo usa automáticamente) ---
+// --- CONFIGURACIÓN UNIVERSAL DE SITIOS ---
 const SITES_DB = {
-    'mercadolibre.com.ar': {
+    // MercadoLibre (Funciona para Argentina, México, Brasil, etc.)
+    'mercadolibre': {
         name: "MercadoLibre",
-        selectors: {
-            product: 'li.ui-search-layout__item, div.poly-card',
-            price: '.price-tag-fraction, .andes-money-amount__fraction'
-        }
+        product: 'li.ui-search-layout__item, div.poly-card',
+        price: '.price-tag-fraction, .andes-money-amount__fraction'
     },
-    'coto.com.ar': {
-        name: "Coto Digital",
-        selectors: {
-            product: '.product-item, .productWrapper, li.product',
-            price: '.price, .product-price, span[itemprop="price"], .atg_store_productPrice'
-        }
+    // Amazon (Global)
+    'amazon': {
+        name: "Amazon",
+        product: 'div[data-component-type="s-search-result"], .sg-col-inner',
+        price: '.a-price-whole, .a-offscreen'
     },
-    'carrefour.com.ar': {
-        name: "Carrefour",
-        selectors: {
-            product: '.product-card, .product-item',
-            price: '.product-price, .valorg'
-        }
+    // eBay
+    'ebay': {
+        name: "eBay",
+        product: 'li.s-item',
+        price: '.s-item__price'
     },
-    'fravega.com': {
+    // AliExpress
+    'aliexpress': {
+        name: "AliExpress",
+        product: '.list-item, .product-card',
+        price: '.price-current, .current-price'
+    },
+    // Tiendas Argentinas (Específicas)
+    'coto': {
+        name: "Coto",
+        product: '.product-item, .productWrapper',
+        price: '.price, span[itemprop="price"]'
+    },
+    'fravega': {
         name: "Frávega",
-        selectors: {
-            product: '.product-card, .product-wrapper',
-            price: '.price-tag-fraction, span.price'
-        }
+        product: '.product-card',
+        price: '.price-tag-fraction'
     },
-    'garbarino.com': {
+    'garbarino': {
         name: "Garbarino",
-        selectors: {
-            product: '.product-item, .card-product',
-            price: '.price, .value-item'
-        }
-    },
-    'tiendamia.com': {
-        name: "Tiendamia",
-        selectors: {
-            product: '.product-item, .item-product',
-            price: '.price, .price-standard'
-        }
+        product: '.product-item',
+        price: '.price'
     }
 };
 
@@ -54,105 +52,158 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 function procesarSitio(presupuesto) {
-    // 1. Identificar en qué sitio estamos
     const hostname = window.location.hostname;
     let config = null;
+    let detectedCurrency = '$'; // Default
 
-    // Buscar configuración en nuestra DB
-    for (const domain in SITES_DB) {
-        if (hostname.includes(domain)) {
-            config = SITES_DB[domain];
-            console.log(`Super Tool: Sitio detectado ${config.name}`);
+    // 1. Detectar Configuración del Sitio
+    for (const key in SITES_DB) {
+        if (hostname.includes(key)) {
+            config = SITES_DB[key];
             break;
         }
     }
 
-    // 2. Si no está en la DB, usar Modo Inteligente (Genérico)
+    // Modo Genérico si no está en la lista
     if (!config) {
-        console.log("Super Tool: Sitio desconocido. Activando Modo Inteligente...");
+        console.log("Super Tool: Sitio desconocido. Modo Genérico.");
         config = {
-            name: "Sitio Genérico",
-            selectors: {
-                // Intenta adivinar productos buscando contenedores comunes
-                product: 'div.product, div.item, li.product, article.product, div[data-product-id]',
-                // Intenta adivinar precios buscando el símbolo $                 price: '.price, .product-price, span[class*="price"]'
-            }
+            name: "Generic Site",
+            product: 'div.product, div.item, li.product, article, div[data-price]',
+            price: '.price, span[class*="price"], div[class*="price"]'
         };
     }
 
-    // 3. Ejecutar filtrado
-    const items = document.querySelectorAll(config.selectors.product);
-    
-    if (items.length === 0) {
-        return "No se encontraron productos. Recarga la página.";
-    }
+    // 2. Ejecutar Filtrado
+    const items = document.querySelectorAll(config.product);
+    if (items.length === 0) return "No products found. Try reloading.";
 
     let countOk = 0;
     let countNo = 0;
 
     items.forEach(item => {
-        // Buscamos el precio. A veces está en un span, a veces en un div
-        const priceEl = item.querySelector(config.selectors.price);
-        
-        // Si encontramos un precio, procesamos
+        const priceEl = item.querySelector(config.price);
         if (priceEl) {
-            // LIMPIEZA DE TEXTO: Elimina puntos, comas, y símbolos no numéricos
-            // Pero mantenemos el número entero final.
-            const rawText = priceEl.textContent;
-            const priceClean = rawText.replace(/\./g, '').replace(/,/g, '').replace(/\$/g, '').replace(/ARS/g, '').trim();
-            const price = parseInt(priceClean);
+            // DETECTOR DE MONEDA: Tomamos el símbolo del primer precio encontrado
+            if (detectedCurrency === '$' && priceEl.textContent) {
+                const match = priceEl.textContent.match(/[^0-9.,\s]/); // Busca primer símbolo no numérico
+                if (match) detectedCurrency = match[0];
+            }
 
-            if (!isNaN(price)) {
-                if (price <= presupuesto) {
-                    // ENTRA EN PRESUPUESTO
+            const priceValue = parsearPrecioUniversal(priceEl.textContent);
+
+            if (priceValue !== null) {
+                if (priceValue <= presupuesto) {
                     countOk++;
-                    item.style.opacity = "1";
-                    item.style.display = ""; // Asegura visibilidad
-                    item.style.border = "2px solid #10b981";
-                    item.style.backgroundColor = "#ecfdf5";
-                    
-                    // Pequeña etiqueta de confirmación
-                    if (!item.querySelector('.super-tool-badge')) {
-                        const badge = document.createElement('div');
-                        badge.className = 'super-tool-badge';
-                        badge.innerText = "✅ Entra";
-                        badge.style.cssText = "position:absolute; top:5px; right:5px; background:#10b981; color:white; padding:2px 6px; font-size:10px; border-radius:3px; z-index:9999;";
-                        
-                        // Solo si el item tiene posición relativa/absoluta funcionará bien
-                        if (window.getComputedStyle(item).position === 'static') {
-                            item.style.position = 'relative';
-                        }
-                        item.appendChild(badge);
-                    }
+                    resaltarProducto(item);
                 } else {
-                    // FUERA DE PRESUPUESTO
                     countNo++;
-                    item.style.opacity = "0.2";
-                    item.style.border = "none";
-                    // Ocultamos completamente si se desea:
-                    // item.style.display = "none"; 
+                    ocultarProducto(item);
                 }
             }
         }
     });
 
-    mostrarDashboard(presupuesto, countOk, countNo);
-    return `${countOk} productos encontrados`;
+    mostrarDashboard(presupuesto, countOk, countNo, detectedCurrency);
+    return `${countOk} products found`;
 }
 
-function mostrarDashboard(presupuesto, ok, no) {
-    // Eliminar dashboard previo si existe
-    const oldDash = document.getElementById('super-tool-dashboard');
-    if (oldDash) oldDash.remove();
+// --- FUNCIONES AUXILIARES ---
+
+function parsearPrecioUniversal(texto) {
+    // Limpia espacios y caracteres raros
+    let limpio = texto.trim();
+    
+    // Caso 1: Formato 1.000,50 (Europa/Latam) o 1,000.50 (USA)
+    // Estrategia simple: Quitamos todo lo que no sea numero, coma o punto.
+    // Luego decidimos si el ultimo separador es decimal.
+    
+    // Eliminamos símbolos de moneda ($, €, R$, etc)
+    limpio = limpio.replace(/[^0-9.,]/g, '');
+
+    if (!limpio) return null;
+
+    // Si tiene ambos separadores, determinamos cuál es el decimal
+    const tienePunto = limpio.lastIndexOf('.') !== -1;
+    const tieneComa = limpio.lastIndexOf(',') !== -1;
+
+    if (tienePunto && tieneComa) {
+        // Si el punto está después de la coma: 1.000,50 -> Europeo
+        if (limpio.lastIndexOf('.') > limpio.lastIndexOf(',')) {
+            // Formato USA: 1,000.50 -> Quitamos comas, punto es decimal
+            limpio = limpio.replace(/,/g, '');
+        } else {
+            // Formato EU: 1.000,50 -> Quitamos puntos, coma es decimal
+            limpio = limpio.replace(/\./g, '').replace(',', '.');
+        }
+    } else if (tieneComa && !tienePunto) {
+        // Puede ser 1000,50 (decimal) o 1,000 (miles). 
+        // Asumiremos que si tiene 2 decimales al final es decimal.
+        const parts = limpio.split(',');
+        if (parts.length > 1 && parts[1].length <= 2) {
+             limpio = limpio.replace(',', '.');
+        } else {
+             limpio = limpio.replace(',', ''); // Es separador de miles
+        }
+    } else if (tienePunto && !tieneComa) {
+        // Puede ser 1000.50 (decimal) o 1.000 (miles - sin coma).
+        // Lógica similar
+        const parts = limpio.split('.');
+        if (parts.length > 1 && parts[1].length > 2) {
+            // Probablemente separador de miles (ej: 12.000)
+            limpio = limpio.replace(/\./g, '');
+        }
+        // Si tiene 2 decimales, dejamos el punto (formato USA)
+    }
+    
+    // Quitamos cualquier coma o punto restante que sea de miles (seguridad extra para enteros grandes)
+    // Nota: Esto es arriesgado. La forma más segura para enteros es:
+    const soloNumeros = limpio.replace(/[^0-9]/g, '');
+    
+    // Para esta app de presupuestos, trabajaremos con ENTEROS principalmente.
+    // Si el presupuesto es 1500 y el precio es 1500.50, probablemente no entre.
+    // Convertimos a entero redondeado.
+    
+    const numeroFinal = parseInt(soloNumeros);
+    return isNaN(numeroFinal) ? null : numeroFinal;
+}
+
+function resaltarProducto(item) {
+    item.style.opacity = "1";
+    item.style.display = "";
+    item.style.border = "2px solid #10b981";
+    item.style.backgroundColor = "#ecfdf5";
+    
+    // Badge
+    if (!item.querySelector('.super-tool-badge')) {
+        const badge = document.createElement('div');
+        badge.className = 'super-tool-badge';
+        badge.innerText = "✅ OK";
+        badge.style.cssText = "position:absolute; top:5px; right:5px; background:#10b981; color:white; padding:2px 6px; font-size:10px; border-radius:3px; z-index:9999; font-family:sans-serif;";
+        if (window.getComputedStyle(item).position === 'static') item.style.position = 'relative';
+        item.appendChild(badge);
+    }
+}
+
+function ocultarProducto(item) {
+    item.style.opacity = "0.2";
+    item.style.border = "none";
+    item.style.backgroundColor = "";
+}
+
+function mostrarDashboard(presupuesto, ok, no, currency) {
+    const old = document.getElementById('super-tool-dashboard');
+    if (old) old.remove();
 
     const dash = document.createElement('div');
     dash.id = 'super-tool-dashboard';
+    // Usamos la moneda detectada
     dash.innerHTML = `
-        <div style="font-weight:bold; margin-bottom:8px;">🛒 Filtro Activo</div>
-        <div>Presupuesto: <b>$${presupuesto.toLocaleString('es-AR')}</b></div>
-        <div style="color:green; margin-top:5px;">Puedes comprar: <b>${ok}</b></div>
-        <div style="color:red; opacity:0.8;">Muy caros: <b>${no}</b></div>
-        <div style="font-size:9px; margin-top:8px; cursor:pointer;" id="close-dash">Cerrar y quitar filtros</div>
+        <div style="font-weight:bold; margin-bottom:8px;">🛒 Budget Active</div>
+        <div>Limit: <b>${currency}${presupuesto.toLocaleString()}</b></div>
+        <div style="color:green; margin-top:5px;">Affordable: <b>${ok}</b></div>
+        <div style="color:red; opacity:0.8;">Too expensive: <b>${no}</b></div>
+        <div style="font-size:9px; margin-top:8px; cursor:pointer; color:#666;" id="close-dash">Click to reset</div>
     `;
 
     dash.style.cssText = `
@@ -164,10 +215,5 @@ function mostrarDashboard(presupuesto, ok, no) {
     `;
 
     document.body.appendChild(dash);
-
-    // Botón para quitar efectos
-    document.getElementById('close-dash').addEventListener('click', () => {
-        // Recarga la página para limpiar todo rápido
-        location.reload();
-    });
+    document.getElementById('close-dash').addEventListener('click', () => location.reload());
 }
