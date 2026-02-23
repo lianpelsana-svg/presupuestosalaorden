@@ -16,3 +16,10 @@ It is a tool that makes it easier to find products according to the end consumer
 
 “Want to use this on your Android phone? Download Kiwi Browser from the Play Store and install our extension. It works just like on a PC!” It's as simple as installing the .zip extension in your Google Chrome browser and going to the online site where you want to view products to buy within your budget. The codes are there for you to see.
 
+
+Open Google Chrome (or Brave/Edge).
+Go to chrome://extensions/ in the address bar.
+Enable “Developer mode” (switch at the top right).
+Click on “Load unpacked extension.”
+Select the folder you downloaded (the one containing the manifest.json file).
+That's it! Navigate to your favorite store, open the extension, and enter your budget.
